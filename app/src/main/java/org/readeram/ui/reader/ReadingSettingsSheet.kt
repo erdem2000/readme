@@ -8,12 +8,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -23,6 +34,7 @@ import org.readeram.R
 import org.readeram.tts.TtsEngineOption
 import org.readeram.tts.TtsVoiceOption
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReadingSettingsSheet(
     settings: ReadingSettings,
@@ -31,6 +43,7 @@ fun ReadingSettingsSheet(
     isPdf: Boolean,
     onChange: ((ReadingSettings) -> ReadingSettings) -> Unit,
     onEngine: (String) -> Unit,
+    onVoice: (String) -> Unit,
     onClose: () -> Unit,
 ) {
     val palette = settings.palette
@@ -159,15 +172,12 @@ fun ReadingSettingsSheet(
         }
         if (voices.isNotEmpty()) {
             Label(stringResource(R.string.tts_voice), palette)
-            ChipRow {
-                voices.take(12).forEach { voice ->
-                    FilterChip(
-                        selected = settings.ttsVoice == voice.name,
-                        onClick = { onChange { it.copy(ttsVoice = voice.name) } },
-                        label = { Text(voice.locale) },
-                    )
-                }
-            }
+            VoicePicker(
+                voices = voices,
+                selectedName = settings.ttsVoice,
+                palette = palette,
+                onVoice = onVoice,
+            )
         }
         Label(stringResource(R.string.tts_speed), palette)
         Slider(
@@ -188,6 +198,54 @@ fun ReadingSettingsSheet(
 @Composable
 private fun Label(text: String, palette: ReadingPalette) {
     Text(text, color = palette.onChrome, fontWeight = FontWeight.Medium)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VoicePicker(
+    voices: List<TtsVoiceOption>,
+    selectedName: String,
+    palette: ReadingPalette,
+    onVoice: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = voices.firstOrNull { it.name == selectedName } ?: voices.firstOrNull()
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = selected?.label.orEmpty(),
+            onValueChange = {},
+            readOnly = true,
+            singleLine = false,
+            maxLines = 3,
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = palette.onChrome,
+                unfocusedTextColor = palette.onChrome,
+                focusedBorderColor = palette.onChrome,
+                unfocusedBorderColor = palette.muted,
+                focusedTrailingIconColor = palette.onChrome,
+                unfocusedTrailingIconColor = palette.onChrome,
+                cursorColor = palette.onChrome,
+            ),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            voices.forEach { voice ->
+                DropdownMenuItem(
+                    text = { Text(voice.label) },
+                    onClick = {
+                        onVoice(voice.name)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
 }
 
 @Composable

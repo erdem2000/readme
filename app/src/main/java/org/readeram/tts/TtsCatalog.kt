@@ -67,17 +67,19 @@ class TtsCatalog(private val context: Context) {
                 val locale = Locale.getDefault()
                 val list = tts?.voices.orEmpty()
                     .filter { !it.isNetworkConnectionRequired }
+                    .filter { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it.features }
                     .sortedWith(
                         compareByDescending<Voice> { it.locale.language == locale.language }
                             .thenByDescending { it.locale.country == locale.country }
-                            .thenBy { it.locale.toLanguageTag() }
+                            .thenBy { it.locale.getDisplayName(locale) }
                             .thenBy { it.name },
                     )
                     .map { voice ->
+                        val localeName = voice.locale.getDisplayName(locale).ifBlank { voice.locale.toLanguageTag() }
                         TtsVoiceOption(
                             name = voice.name,
                             locale = voice.locale.toLanguageTag(),
-                            label = "${voice.locale.displayName} · ${voice.name.substringAfterLast(' ')}",
+                            label = "$localeName · ${voice.name}",
                         )
                     }
                 tts?.shutdown()

@@ -4,9 +4,11 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.KeyboardDoubleArrowLeft
+import androidx.compose.material.icons.outlined.KeyboardDoubleArrowRight
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Settings
@@ -41,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,10 +56,15 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,11 +92,22 @@ fun ReaderPane(
     val tts by vm.ttsState.collectAsStateWithLifecycle()
     val engines by vm.engines.collectAsStateWithLifecycle()
     val voices by vm.voices.collectAsStateWithLifecycle()
+    val reflowPageCount by vm.reflowPageCount.collectAsStateWithLifecycle()
     val palette = settings.palette
     var chrome by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     val activity = LocalContext.current as? Activity
+
+    fun openSettings() {
+        vm.onSettingsOpened()
+        showSettings = true
+    }
+
+    fun closeSettings() {
+        vm.onSettingsClosed()
+        showSettings = false
+    }
 
     DisposableEffect(settings.brightness, settings.useSystemBrightness) {
         activity?.let { applyBrightness(it, settings) }
@@ -124,10 +145,17 @@ fun ReaderPane(
                 ReflowReader(
                     book = opened as OpenedBook.Reflow,
                     chapterIndex = chapterIndex,
+                    pageIndex = pageIndex,
                     settings = settings,
                     highlight = tts.takeIf { it.bookId == bookId }?.currentText,
+                    onPage = vm::setPage,
+                    onPagesReady = vm::updateReflowPages,
                     onToggleChrome = { chrome = !chrome },
                     onCycleColor = { vm.cycleColorMode() },
+                    onSeekSentence = { sentenceId ->
+                        val index = (opened as OpenedBook.Reflow).sentences.indexOfFirst { it.id == sentenceId }
+                        if (index >= 0) vm.seekToSentence(index)
+                    },
                     onBrightnessDrag = { delta ->
                         if (!settings.useSystemBrightness) {
                             vm.updateSettings {
@@ -199,7 +227,7 @@ fun ReaderPane(
                         IconButton(onClick = { vm.addBookmark() }) {
                             Icon(Icons.Outlined.BookmarkAdd, stringResource(R.string.bookmark), tint = palette.onChrome)
                         }
-                        IconButton(onClick = { showSettings = true }) {
+                        IconButton(onClick = { openSettings() }) {
                             Icon(Icons.Outlined.Tune, stringResource(R.string.reading_settings), tint = palette.onChrome)
                         }
                     }
@@ -207,14 +235,30 @@ fun ReaderPane(
                 TtsBar(
                     state = tts.takeIf { it.bookId == bookId } ?: TtsPlaybackState(),
                     palette = palette,
-                    onPlay = vm::playTts,
+                    onPlay = { vm.playTts() },
                     onPause = vm::pauseTts,
                     onResume = vm::resumeTts,
                     onStop = vm::stopTts,
-                    onPrev = vm::prevSentence,
-                    onNext = vm::nextSentence,
-                    onSettings = { showSettings = true },
+                    onPrevSentence = vm::prevSentence,
+                    onNextSentence = vm::nextSentence,
+                    onPrevPage = vm::prevPage,
+                    onNextPage = vm::nextPage,
+                    onSettings = { openSettings() },
                 )
+                val pageLabel = when (val o = opened) {
+                    is OpenedBook.Reflow -> stringResource(R.string.page_n, pageIndex + 1, reflowPageCount.coerceAtLeast(1))
+                    is OpenedBook.Pdf -> stringResource(R.string.page_n, pageIndex + 1, o.pageCount.coerceAtLeast(1))
+                    else -> ""
+                }
+                if (pageLabel.isNotEmpty()) {
+                    Text(
+                        pageLabel,
+                        color = palette.onChrome,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(bottom = 2.dp),
+                    )
+                }
                 val progress = when (val o = opened) {
                     is OpenedBook.Reflow -> if (o.chapters.isEmpty()) 0f else (chapterIndex + 1f) / o.chapters.size
                     is OpenedBook.Pdf -> if (o.pageCount == 0) 0f else (pageIndex + 1f) / o.pageCount
@@ -233,7 +277,7 @@ fun ReaderPane(
 
         if (showSettings) {
             ModalBottomSheet(
-                onDismissRequest = { showSettings = false },
+                onDismissRequest = { closeSettings() },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
                 containerColor = palette.chrome,
             ) {
@@ -247,7 +291,11 @@ fun ReaderPane(
                         vm.updateSettings { it.copy(ttsEngine = engine, ttsVoice = "") }
                         vm.reloadVoices(engine)
                     },
-                    onClose = { showSettings = false },
+                    onVoice = { voice ->
+                        vm.updateSettings { it.copy(ttsVoice = voice) }
+                        vm.previewVoice(voice)
+                    },
+                    onClose = { closeSettings() },
                 )
             }
         }
@@ -300,8 +348,10 @@ private fun TtsBar(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
+    onPrevSentence: () -> Unit,
+    onNextSentence: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
     onSettings: () -> Unit,
 ) {
     Row(
@@ -312,7 +362,10 @@ private fun TtsBar(
         IconButton(onClick = onSettings) {
             Icon(Icons.Outlined.Settings, stringResource(R.string.tts_title), tint = palette.onChrome)
         }
-        IconButton(onClick = onPrev) {
+        IconButton(onClick = onPrevPage) {
+            Icon(Icons.Outlined.KeyboardDoubleArrowLeft, stringResource(R.string.prev_page), tint = palette.onChrome)
+        }
+        IconButton(onClick = onPrevSentence) {
             Icon(Icons.Outlined.SkipPrevious, stringResource(R.string.prev_sentence), tint = palette.onChrome)
         }
         IconButton(
@@ -330,8 +383,11 @@ private fun TtsBar(
                 tint = palette.onChrome,
             )
         }
-        IconButton(onClick = onNext) {
+        IconButton(onClick = onNextSentence) {
             Icon(Icons.Outlined.SkipNext, stringResource(R.string.next_sentence), tint = palette.onChrome)
+        }
+        IconButton(onClick = onNextPage) {
+            Icon(Icons.Outlined.KeyboardDoubleArrowRight, stringResource(R.string.next_page), tint = palette.onChrome)
         }
         IconButton(onClick = onStop) {
             Icon(Icons.Outlined.Stop, stringResource(R.string.tts_stop), tint = palette.onChrome)
@@ -343,44 +399,123 @@ private fun TtsBar(
 private fun ReflowReader(
     book: OpenedBook.Reflow,
     chapterIndex: Int,
+    pageIndex: Int,
     settings: ReadingSettings,
     highlight: String?,
+    onPage: (Int) -> Unit,
+    onPagesReady: (List<ReflowPage>) -> Unit,
     onToggleChrome: () -> Unit,
     onCycleColor: () -> Unit,
+    onSeekSentence: (Int) -> Unit,
     onBrightnessDrag: (Float) -> Unit,
 ) {
     val chapter = book.chapters.getOrNull(chapterIndex) ?: return
     val palette = settings.palette
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(
+        BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .clickable { onToggleChrome() }
-                .padding(horizontal = settings.marginDp.dp, vertical = 88.dp),
+                .padding(horizontal = settings.marginDp.dp, vertical = 96.dp),
         ) {
-            item {
-                Text(
-                    chapter.title,
-                    color = palette.onBackground,
-                    fontSize = (settings.fontSizeSp + 4).sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = settings.font.family,
-                    modifier = Modifier.padding(bottom = 16.dp),
+            val width = constraints.maxWidth
+            val height = constraints.maxHeight
+            val spacing = with(density) { settings.paragraphSpacingSp.dp.roundToPx() }
+            val titleStyle = TextStyle(
+                color = palette.onBackground,
+                fontSize = (settings.fontSizeSp + 4).sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = settings.font.family,
+            )
+            val bodyStyle = TextStyle(
+                color = palette.onBackground,
+                fontSize = settings.fontSizeSp.sp,
+                fontFamily = settings.font.family,
+                fontWeight = settings.weight.weight,
+                lineHeight = (settings.fontSizeSp * settings.lineHeight).sp,
+                textAlign = settings.align.compose,
+            )
+            val pages = remember(
+                chapter,
+                chapterIndex,
+                width,
+                height,
+                settings.font,
+                settings.fontSizeSp,
+                settings.weight,
+                settings.lineHeight,
+                settings.paragraphSpacingSp,
+                settings.align,
+            ) {
+                paginateChapter(
+                    chapter = chapter,
+                    chapterIndex = chapterIndex,
+                    maxWidth = width,
+                    maxHeight = height,
+                    titleStyle = titleStyle,
+                    bodyStyle = bodyStyle,
+                    paragraphSpacingPx = spacing,
+                    measurer = measurer,
                 )
             }
-            itemsIndexed(chapter.paragraphs) { index, paragraph ->
-                val sentenceHere = chapter.sentences.filter { it.paragraphIndex == index }
-                val highlighted = highlight?.takeIf { h -> sentenceHere.any { it.text == h } }
-                Text(
-                    text = annotatedParagraph(paragraph, highlighted, palette),
-                    color = palette.onBackground,
-                    fontSize = settings.fontSizeSp.sp,
-                    fontFamily = settings.font.family,
-                    fontWeight = settings.weight.weight,
-                    lineHeight = (settings.fontSizeSp * settings.lineHeight).sp,
-                    textAlign = settings.align.compose,
-                    modifier = Modifier.padding(bottom = settings.paragraphSpacingSp.dp),
+            LaunchedEffect(pages) { onPagesReady(pages) }
+            key(chapterIndex) {
+                val pagerState = rememberPagerState(
+                    initialPage = pageIndex.coerceIn(0, pages.lastIndex.coerceAtLeast(0)),
+                    pageCount = { pages.size.coerceAtLeast(1) },
                 )
+                LaunchedEffect(pageIndex, pages.size) {
+                    val target = pageIndex.coerceIn(0, pages.lastIndex.coerceAtLeast(0))
+                    if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+                }
+                LaunchedEffect(pagerState.currentPage) {
+                    if (pagerState.currentPage != pageIndex) onPage(pagerState.currentPage)
+                }
+                LaunchedEffect(highlight, pages) {
+                    val target = pages.indexOfFirst { it.containsText(highlight) }
+                    if (target >= 0 && pagerState.currentPage != target) pagerState.scrollToPage(target)
+                }
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                    val current = pages.getOrNull(page) ?: return@HorizontalPager
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTapGestures(onTap = { onToggleChrome() })
+                            },
+                    ) {
+                        current.blocks.forEachIndexed { index, block ->
+                            val highlighted = highlight?.takeIf { h ->
+                                block.text.contains(h) || block.sentences.any { it.text == h }
+                            }
+                            var layout by remember(page, index, block.text) { mutableStateOf<TextLayoutResult?>(null) }
+                            Text(
+                                text = annotatedParagraph(block.text, highlighted, palette),
+                                color = palette.onBackground,
+                                fontSize = if (block.isTitle) (settings.fontSizeSp + 4).sp else settings.fontSizeSp.sp,
+                                fontFamily = settings.font.family,
+                                fontWeight = if (block.isTitle) FontWeight.SemiBold else settings.weight.weight,
+                                lineHeight = (settings.fontSizeSp * settings.lineHeight).sp,
+                                textAlign = if (block.isTitle) TextAlign.Start else settings.align.compose,
+                                onTextLayout = { layout = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = if (block.isTitle) 16.dp else settings.paragraphSpacingSp.dp)
+                                    .pointerInput(block.sentences, block.text) {
+                                        detectTapGestures(
+                                            onTap = { onToggleChrome() },
+                                            onLongPress = { offset ->
+                                                val pos = layout?.getOffsetForPosition(offset) ?: return@detectTapGestures
+                                                val sentence = sentenceAtOffset(block.text, block.sentences, pos)
+                                                if (sentence != null) onSeekSentence(sentence.id)
+                                            },
+                                        )
+                                    },
+                            )
+                        }
+                    }
+                }
             }
         }
         EdgeGestures(onCycleColor, onBrightnessDrag)

@@ -84,6 +84,7 @@ class TtsPlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
             TtsController.ACTION_STOP -> stopInternal()
             TtsController.ACTION_NEXT -> skip(1)
             TtsController.ACTION_PREV -> skip(-1)
+            TtsController.ACTION_SEEK -> seekTo(intent.getIntExtra(TtsController.EXTRA_INDEX, -1))
         }
         return START_STICKY
     }
@@ -248,6 +249,15 @@ class TtsPlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
                 it.copy(currentText = request.sentences[next])
             }
             publish()
+        }
+    }
+
+    private fun seekTo(index: Int) {
+        val request = TtsSession.request ?: return
+        if (index !in request.sentences.indices) return
+        TtsSession.update { it.copy(sentenceIndex = index) }
+        ensureEngine(request) {
+            if (requestFocus()) speakCurrent(flush = true)
         }
     }
 

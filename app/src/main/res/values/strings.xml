@@ -64,6 +64,8 @@
     <string name="close">Kapat</string>
     <string name="next_sentence">Sonraki cümle</string>
     <string name="prev_sentence">Önceki cümle</string>
+    <string name="next_page">Sonraki sayfa</string>
+    <string name="prev_page">Önceki sayfa</string>
     <string name="importing">İçe aktarılıyor…</string>
     <string name="format_epub">EPUB</string>
     <string name="format_pdf">PDF</string>

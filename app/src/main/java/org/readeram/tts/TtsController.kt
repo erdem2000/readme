@@ -12,6 +12,8 @@ object TtsController {
     const val ACTION_STOP = "org.readeram.tts.STOP"
     const val ACTION_NEXT = "org.readeram.tts.NEXT"
     const val ACTION_PREV = "org.readeram.tts.PREV"
+    const val ACTION_SEEK = "org.readeram.tts.SEEK"
+    const val EXTRA_INDEX = "org.readeram.tts.INDEX"
 
     fun play(context: Context, request: TtsPlayRequest) {
         TtsSession.request = request
@@ -24,6 +26,10 @@ object TtsController {
     fun next(context: Context) = start(context, ACTION_NEXT)
     fun prev(context: Context) = start(context, ACTION_PREV)
 
+    fun seek(context: Context, index: Int) {
+        start(context, ACTION_SEEK, index)
+    }
+
     fun toggle(context: Context) {
         val state = TtsSession.state.value
         when {
@@ -33,9 +39,10 @@ object TtsController {
         }
     }
 
-    private fun start(context: Context, action: String) {
+    private fun start(context: Context, action: String, index: Int? = null) {
         val app = context.applicationContext
         val intent = Intent(app, TtsPlaybackService::class.java).setAction(action)
+        if (index != null) intent.putExtra(EXTRA_INDEX, index)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             app.startForegroundService(intent)
         } else {
