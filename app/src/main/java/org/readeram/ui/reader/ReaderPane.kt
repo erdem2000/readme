@@ -10,12 +10,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
@@ -36,6 +45,7 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
@@ -55,8 +65,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -68,11 +80,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.abs
 import org.readeram.R
 import org.readeram.parser.OpenedBook
 import org.readeram.tts.TtsPlaybackState
+
+private val ReaderChromeContentHeight = 144.dp
+private val TitleBlockSpacing = 16.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,7 +114,35 @@ fun ReaderPane(
     var chrome by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
+    var chromeHeightDp by remember { mutableStateOf(0.dp) }
     val activity = LocalContext.current as? Activity
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val safeDrawing = WindowInsets.safeDrawing.asPaddingValues()
+    val fallbackChrome = ReaderChromeContentHeight + if (tabletop) {
+        safeDrawing.calculateBottomPadding()
+    } else {
+        safeDrawing.calculateTopPadding()
+    }
+    val reservedChrome = if (chromeHeightDp > 0.dp) chromeHeightDp else fallbackChrome
+    val readerPadding = PaddingValues(
+        start = settings.marginDp.dp + safeDrawing.calculateStartPadding(layoutDirection),
+        end = settings.marginDp.dp + safeDrawing.calculateEndPadding(layoutDirection),
+        top = if (tabletop) {
+            safeDrawing.calculateTopPadding() + settings.marginDp.dp
+        } else {
+            reservedChrome
+        },
+        bottom = if (tabletop) {
+            reservedChrome
+        } else {
+            safeDrawing.calculateBottomPadding() + settings.marginDp.dp
+        },
+    )
+    val pdfPadding = PaddingValues(
+        top = readerPadding.calculateTopPadding(),
+        bottom = readerPadding.calculateBottomPadding(),
+    )
 
     fun openSettings() {
         vm.onSettingsOpened()
@@ -113,6 +158,17 @@ fun ReaderPane(
         activity?.let { applyBrightness(it, settings) }
         onDispose {
             activity?.let { restoreBrightness(it) }
+        }
+    }
+
+    DisposableEffect(palette.isDark) {
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        controller?.isAppearanceLightStatusBars = !palette.isDark
+        controller?.isAppearanceLightNavigationBars = !palette.isDark
+        onDispose {
+            controller?.isAppearanceLightStatusBars = true
+            controller?.isAppearanceLightNavigationBars = true
         }
     }
 
@@ -163,6 +219,7 @@ fun ReaderPane(
                             }
                         }
                     },
+                    contentPadding = readerPadding,
                 )
             }
             opened is OpenedBook.Pdf -> {
@@ -171,6 +228,7 @@ fun ReaderPane(
                     pdf = opened as OpenedBook.Pdf,
                     pageIndex = pageIndex,
                     settings = settings,
+                    contentPadding = pdfPadding,
                     onPage = {
                         vm.setPage(it)
                     },
@@ -197,11 +255,23 @@ fun ReaderPane(
 
         val showChrome = chrome || tabletop
         if (showChrome) {
+            val chromeInsets = if (tabletop) {
+                WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+            } else {
+                WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+            }
             Column(
                 Modifier
                     .align(if (tabletop) Alignment.BottomCenter else Alignment.TopCenter)
                     .fillMaxWidth()
+                    .onSizeChanged { size ->
+                        val height = with(density) { size.height.toDp() }
+                        if (abs(height.value - chromeHeightDp.value) > 0.5f) {
+                            chromeHeightDp = height
+                        }
+                    }
                     .background(palette.chrome.copy(alpha = 0.96f))
+                    .windowInsetsPadding(chromeInsets)
                     .padding(horizontal = 4.dp, vertical = 6.dp),
             ) {
                 if (!tabletop) {
@@ -408,33 +478,42 @@ private fun ReflowReader(
     onCycleColor: () -> Unit,
     onSeekSentence: (Int) -> Unit,
     onBrightnessDrag: (Float) -> Unit,
+    contentPadding: PaddingValues,
 ) {
     val chapter = book.chapters.getOrNull(chapterIndex) ?: return
     val palette = settings.palette
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
+    val localTextStyle = LocalTextStyle.current
     Box(Modifier.fillMaxSize()) {
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
-                .padding(horizontal = settings.marginDp.dp, vertical = 96.dp),
+                .padding(contentPadding),
         ) {
             val width = constraints.maxWidth
             val height = constraints.maxHeight
             val spacing = with(density) { settings.paragraphSpacingSp.dp.roundToPx() }
-            val titleStyle = TextStyle(
-                color = palette.onBackground,
-                fontSize = (settings.fontSizeSp + 4).sp,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = settings.font.family,
+            val titleSpacing = with(density) { TitleBlockSpacing.roundToPx() }
+            val titleStyle = localTextStyle.merge(
+                TextStyle(
+                    color = palette.onBackground,
+                    fontSize = (settings.fontSizeSp + 4).sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = settings.font.family,
+                    lineHeight = (settings.fontSizeSp * settings.lineHeight).sp,
+                    textAlign = TextAlign.Start,
+                ),
             )
-            val bodyStyle = TextStyle(
-                color = palette.onBackground,
-                fontSize = settings.fontSizeSp.sp,
-                fontFamily = settings.font.family,
-                fontWeight = settings.weight.weight,
-                lineHeight = (settings.fontSizeSp * settings.lineHeight).sp,
-                textAlign = settings.align.compose,
+            val bodyStyle = localTextStyle.merge(
+                TextStyle(
+                    color = palette.onBackground,
+                    fontSize = settings.fontSizeSp.sp,
+                    fontFamily = settings.font.family,
+                    fontWeight = settings.weight.weight,
+                    lineHeight = (settings.fontSizeSp * settings.lineHeight).sp,
+                    textAlign = settings.align.compose,
+                ),
             )
             val pages = remember(
                 chapter,
@@ -447,6 +526,7 @@ private fun ReflowReader(
                 settings.lineHeight,
                 settings.paragraphSpacingSp,
                 settings.align,
+                localTextStyle,
             ) {
                 paginateChapter(
                     chapter = chapter,
@@ -456,6 +536,7 @@ private fun ReflowReader(
                     titleStyle = titleStyle,
                     bodyStyle = bodyStyle,
                     paragraphSpacingPx = spacing,
+                    titleSpacingPx = titleSpacing,
                     measurer = measurer,
                 )
             }
@@ -489,19 +570,15 @@ private fun ReflowReader(
                             val highlighted = highlight?.takeIf { h ->
                                 block.text.contains(h) || block.sentences.any { it.text == h }
                             }
+                            val style = if (block.isTitle) titleStyle else bodyStyle
                             var layout by remember(page, index, block.text) { mutableStateOf<TextLayoutResult?>(null) }
                             Text(
                                 text = annotatedParagraph(block.text, highlighted, palette),
-                                color = palette.onBackground,
-                                fontSize = if (block.isTitle) (settings.fontSizeSp + 4).sp else settings.fontSizeSp.sp,
-                                fontFamily = settings.font.family,
-                                fontWeight = if (block.isTitle) FontWeight.SemiBold else settings.weight.weight,
-                                lineHeight = (settings.fontSizeSp * settings.lineHeight).sp,
-                                textAlign = if (block.isTitle) TextAlign.Start else settings.align.compose,
+                                style = style,
                                 onTextLayout = { layout = it },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(bottom = if (block.isTitle) 16.dp else settings.paragraphSpacingSp.dp)
+                                    .padding(bottom = if (block.isTitle) TitleBlockSpacing else settings.paragraphSpacingSp.dp)
                                     .pointerInput(block.sentences, block.text) {
                                         detectTapGestures(
                                             onTap = { onToggleChrome() },
@@ -528,6 +605,7 @@ private fun PdfReader(
     pdf: OpenedBook.Pdf,
     pageIndex: Int,
     settings: ReadingSettings,
+    contentPadding: PaddingValues,
     onPage: (Int) -> Unit,
     onToggleChrome: () -> Unit,
     onCycleColor: () -> Unit,
@@ -543,7 +621,12 @@ private fun PdfReader(
     val palette = settings.palette
     val filter = pdfColorFilter(settings.colorMode)
     Box(Modifier.fillMaxSize()) {
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+        ) { page ->
             if (uri != null) {
                 PdfPageImage(
                     uri = uri,

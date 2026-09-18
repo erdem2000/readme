@@ -35,6 +35,7 @@ fun paginateChapter(
     titleStyle: TextStyle,
     bodyStyle: TextStyle,
     paragraphSpacingPx: Int,
+    titleSpacingPx: Int,
     measurer: TextMeasurer,
 ): List<ReflowPage> {
     if (maxWidth <= 0 || maxHeight <= 0) {
@@ -48,14 +49,18 @@ fun paginateChapter(
     }
     val pages = mutableListOf<ReflowPage>()
     var blocks = mutableListOf<ReflowBlock>()
-    var remaining = maxHeight
+    // 2px slack covers rounding between TextMeasurer and the Text composable.
+    var remaining = (maxHeight - 2).coerceAtLeast(0)
+    val pageHeight = remaining
 
     fun flush() {
         if (blocks.isEmpty()) return
         pages += ReflowPage(chapterIndex, pages.size, blocks.toList())
         blocks = mutableListOf()
-        remaining = maxHeight
+        remaining = pageHeight
     }
+
+    fun spacingAfter(isTitle: Boolean) = if (isTitle) titleSpacingPx else paragraphSpacingPx
 
     fun measure(text: String, style: TextStyle): Int {
         if (text.isEmpty()) return 0
@@ -67,75 +72,81 @@ fun paginateChapter(
     }
 
     fun add(block: ReflowBlock, height: Int) {
-        val gap = if (blocks.isEmpty()) 0 else paragraphSpacingPx
-        if (blocks.isNotEmpty() && gap + height > remaining) {
+        val used = height + spacingAfter(block.isTitle)
+        if (blocks.isNotEmpty() && used > remaining) {
             flush()
             add(block, height)
             return
         }
-        val usedGap = if (blocks.isEmpty()) 0 else paragraphSpacingPx
         blocks += block
-        remaining -= usedGap + height
-        if (remaining < 0) flush()
+        remaining -= used
+        if (remaining <= 0) flush()
     }
 
-    fun addFitted(text: String, style: TextStyle, paragraphIndex: Int, sentences: List<Sentence>, isTitle: Boolean) {
-        val height = measure(text, style)
-        val gap = if (blocks.isEmpty()) 0 else paragraphSpacingPx
-        if (height <= remaining - gap) {
-            add(ReflowBlock(paragraphIndex, text, isTitle, sentences), height)
-            return
-        }
-        val measured = measurer.measure(
-            text = text,
-            style = style,
-            constraints = Constraints(maxWidth = maxWidth),
-        )
-        if (measured.lineCount == 0) return
-        var line = 0
-        while (line < measured.lineCount) {
-            val lineGap = if (blocks.isEmpty()) 0 else paragraphSpacingPx
-            val avail = remaining - lineGap
-            val lineH = (measured.getLineBottom(line) - measured.getLineTop(line)).toInt().coerceAtLeast(1)
-            if (blocks.isNotEmpty() && lineH > avail) {
+    fun addFitted(
+        text: String,
+        style: TextStyle,
+        paragraphIndex: Int,
+        sentences: List<Sentence>,
+        isTitle: Boolean,
+    ) {
+        var index = 0
+        while (index < text.length) {
+            while (index < text.length && text[index].isWhitespace()) index++
+            if (index >= text.length) break
+
+            val spacing = spacingAfter(isTitle)
+            if (blocks.isNotEmpty() && remaining <= spacing) {
                 flush()
                 continue
             }
-            val startLine = line
-            var endLine = line
-            val top = measured.getLineTop(startLine)
-            while (endLine < measured.lineCount) {
-                val h = (measured.getLineBottom(endLine) - top).toInt()
-                if (endLine > startLine && h > remaining - (if (blocks.isEmpty()) 0 else paragraphSpacingPx)) break
-                endLine++
-            }
-            if (endLine == startLine) endLine = (startLine + 1).coerceAtMost(measured.lineCount)
-            val start = measured.getLineStart(startLine)
-            val end = measured.getLineEnd(endLine - 1, visibleEnd = true).coerceIn(start, text.length)
-            val slice = text.substring(start, end).trim()
-            if (slice.isNotEmpty()) {
-                val h = (measured.getLineBottom(endLine - 1) - measured.getLineTop(startLine)).toInt().coerceAtLeast(lineH)
+
+            val chunk = text.substring(index)
+            val avail = (remaining - spacing).coerceAtLeast(0)
+            val split = takeFittingPrefix(chunk, style, avail, measurer, maxWidth)
+            if (split == null) {
+                if (blocks.isNotEmpty()) {
+                    flush()
+                    continue
+                }
+                val forced = firstLine(chunk, style, measurer, maxWidth) ?: return
+                if (forced.consumed <= 0) break
                 add(
                     ReflowBlock(
                         paragraphIndex = paragraphIndex,
-                        text = slice,
+                        text = forced.text,
                         isTitle = isTitle,
-                        sentences = sentencesForSlice(text, start, end, sentences),
+                        sentences = sentencesForSlice(text, index, index + forced.consumed, sentences),
                     ),
-                    h,
+                    measure(forced.text, style),
                 )
+                index += forced.consumed
+                if (index < text.length) flush()
+                continue
             }
-            line = endLine
-            if (blocks.isNotEmpty() && remaining <= lineH / 4) flush()
+
+            if (split.consumed <= 0) break
+            val prefix = split.text
+            add(
+                ReflowBlock(
+                    paragraphIndex = paragraphIndex,
+                    text = prefix,
+                    isTitle = isTitle,
+                    sentences = sentencesForSlice(text, index, index + split.consumed, sentences),
+                ),
+                measure(prefix, style),
+            )
+            index += split.consumed
+            if (index < text.length) flush()
         }
     }
 
     if (chapter.title.isNotBlank()) {
         addFitted(chapter.title, titleStyle, -1, emptyList(), true)
     }
-    chapter.paragraphs.forEachIndexed { index, paragraph ->
-        val sentences = chapter.sentences.filter { it.paragraphIndex == index }
-        addFitted(paragraph, bodyStyle, index, sentences, false)
+    chapter.paragraphs.forEachIndexed { pIndex, paragraph ->
+        val sentences = chapter.sentences.filter { it.paragraphIndex == pIndex }
+        addFitted(paragraph, bodyStyle, pIndex, sentences, false)
     }
     flush()
     if (pages.isEmpty()) {
@@ -159,6 +170,57 @@ fun sentenceAtOffset(text: String, sentences: List<Sentence>, offset: Int): Sent
         last = sentence
     }
     return last ?: sentences.lastOrNull()
+}
+
+private data class TextSplit(val text: String, val consumed: Int)
+
+private fun takeFittingPrefix(
+    text: String,
+    style: TextStyle,
+    maxHeight: Int,
+    measurer: TextMeasurer,
+    maxWidth: Int,
+): TextSplit? {
+    if (text.isEmpty() || maxHeight <= 0) return null
+    val constraints = Constraints(maxWidth = maxWidth)
+    val full = measurer.measure(text = text, style = style, constraints = constraints)
+    if (full.size.height <= maxHeight) {
+        return TextSplit(text.trimEnd(), text.length)
+    }
+    if (full.lineCount == 0) return null
+
+    var lastFit: TextSplit? = null
+    for (line in 0 until full.lineCount) {
+        val end = full.getLineEnd(line, visibleEnd = true).coerceIn(0, text.length)
+        if (end <= 0) continue
+        val prefix = text.substring(0, end).trimEnd()
+        if (prefix.isEmpty()) continue
+        val height = measurer.measure(text = prefix, style = style, constraints = constraints).size.height
+        if (height <= maxHeight) {
+            lastFit = TextSplit(prefix, end)
+        } else {
+            break
+        }
+    }
+    return lastFit
+}
+
+private fun firstLine(
+    text: String,
+    style: TextStyle,
+    measurer: TextMeasurer,
+    maxWidth: Int,
+): TextSplit? {
+    val measured = measurer.measure(
+        text = text,
+        style = style,
+        constraints = Constraints(maxWidth = maxWidth),
+    )
+    if (measured.lineCount == 0) return null
+    val end = measured.getLineEnd(0, visibleEnd = true).coerceIn(0, text.length)
+    val prefix = text.substring(0, end).trimEnd()
+    if (prefix.isEmpty()) return null
+    return TextSplit(prefix, end)
 }
 
 private fun sentencesForSlice(
