@@ -240,10 +240,7 @@ class ReaderViewModel(
         previewSentence = currentSentenceText()
         if (wasActive) stopTts()
         previewJob?.cancel()
-        previewJob = viewModelScope.launch {
-            if (wasActive) delay(350)
-            speakPreview(settings.value.ttsVoice, previewSentence)
-        }
+        // Do not auto-preview on open; only speak after an explicit TTS control change.
     }
 
     fun previewVoice(voice: String) {
@@ -270,7 +267,17 @@ class ReaderViewModel(
                 if (pick.isNotEmpty()) updateSettings { it.copy(ttsVoice = pick) }
                 pick
             }
-            if (previewSentence.isNotBlank()) speakPreview(selected, previewSentence)
+            val sample = previewSentence.ifBlank { currentSentenceText() }
+            if (selected.isNotEmpty() && sample.isNotBlank()) {
+                speakPreview(selected, sample)
+            }
+        }
+    }
+
+    fun previewTtsSettings() {
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch {
+            speakPreview(settings.value.ttsVoice, previewSentence.ifBlank { currentSentenceText() })
         }
     }
 

@@ -17,8 +17,10 @@ class BookParser(context: Context) {
 
     fun parseMeta(uri: Uri, id: String): BookMeta {
         val name = queryName(uri)
+        val fallback = name.substringBeforeLast('.').ifBlank { name }
+            .takeUnless { it.equals("content", ignoreCase = true) } ?: name
         return when (formatOf(uri)) {
-            BookFormat.Epub -> epub.parseMeta(uri, id)
+            BookFormat.Epub -> epub.parseMeta(uri, id, fallback)
             BookFormat.Pdf -> pdf.parseMeta(uri)
             BookFormat.Txt -> txt.parseMeta(uri, name)
             null -> error("Unsupported format")
@@ -27,8 +29,10 @@ class BookParser(context: Context) {
 
     fun open(uri: Uri, id: String): OpenedBook {
         val name = queryName(uri)
+        val fallback = name.substringBeforeLast('.').ifBlank { name }
+            .takeUnless { it.equals("content", ignoreCase = true) } ?: name
         return when (formatOf(uri)) {
-            BookFormat.Epub -> epub.open(uri, id)
+            BookFormat.Epub -> epub.open(uri, id, fallback)
             BookFormat.Pdf -> pdf.open(uri)
             BookFormat.Txt -> txt.open(uri, name)
             null -> error("Unsupported format")

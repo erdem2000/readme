@@ -37,6 +37,12 @@ interface BookDao {
     @Query("UPDATE books SET readStatus = :status WHERE id = :id")
     suspend fun updateReadStatus(id: String, status: String)
 
+    @Query("SELECT * FROM books")
+    suspend fun getAllBooks(): List<BookEntity>
+
+    @Query("UPDATE books SET title = :title, displayName = :displayName WHERE id = :id")
+    suspend fun updateTitle(id: String, title: String, displayName: String)
+
     @Insert
     suspend fun insertBookmark(bookmark: BookmarkEntity): Long
 

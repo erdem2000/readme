@@ -7,9 +7,11 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.readeram.ReaderamApplication
 import org.readeram.data.local.BookEntity
@@ -63,6 +65,18 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy
 
+    private val _selectionMode = MutableStateFlow(false)
+    val selectionMode: StateFlow<Boolean> = _selectionMode.asStateFlow()
+
+    private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
+    val selectedIds: StateFlow<Set<String>> = _selectedIds.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            runCatching { library.repairContentTitles() }
+        }
+    }
+
     fun setViewMode(mode: LibraryViewMode) {
         viewModelScope.launch { prefs.setLibraryViewMode(mode.key) }
     }
@@ -111,5 +125,55 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun removeFromCollection(bookId: String, collectionId: String) {
         viewModelScope.launch { library.removeFromCollection(bookId, collectionId) }
+    }
+
+    fun startSelection(bookId: String) {
+        _selectionMode.value = true
+        _selectedIds.value = setOf(bookId)
+    }
+
+    fun clearSelection() {
+        _selectionMode.value = false
+        _selectedIds.value = emptySet()
+    }
+
+    fun toggleSelected(bookId: String) {
+        if (!_selectionMode.value) {
+            startSelection(bookId)
+            return
+        }
+        _selectedIds.update { cur ->
+            if (bookId in cur) cur - bookId else cur + bookId
+        }
+        if (_selectedIds.value.isEmpty()) {
+            _selectionMode.value = false
+        }
+    }
+
+    fun removeSelected(onRemoved: (String) -> Unit = {}) {
+        val ids = _selectedIds.value.toList()
+        viewModelScope.launch {
+            ids.forEach {
+                library.removeBook(it)
+                onRemoved(it)
+            }
+            clearSelection()
+        }
+    }
+
+    fun addSelectedToCollection(collectionId: String) {
+        val ids = _selectedIds.value.toList()
+        viewModelScope.launch {
+            ids.forEach { library.addToCollection(it, collectionId) }
+            clearSelection()
+        }
+    }
+
+    fun removeSelectedFromCollection(collectionId: String) {
+        val ids = _selectedIds.value.toList()
+        viewModelScope.launch {
+            ids.forEach { library.removeFromCollection(it, collectionId) }
+            clearSelection()
+        }
     }
 }

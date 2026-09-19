@@ -1,9 +1,19 @@
 package org.readeram.ui.reader
 
+
 import android.app.Activity
 import android.view.WindowManager
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -32,6 +42,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.List
@@ -66,6 +77,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -125,7 +137,7 @@ fun ReaderPane(
     val palette = settings.palette
     val chromeColor = MaterialTheme.colorScheme.surface
     val chromeOn = MaterialTheme.colorScheme.onSurface
-    var chrome by remember { mutableStateOf(true) }
+    var chrome by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var showBookmarkHint by remember { mutableStateOf(false) }
@@ -141,17 +153,24 @@ fun ReaderPane(
     } else {
         safeDrawing.calculateTopPadding()
     }
-    val reservedChrome = if (chromeHeightDp > 0.dp) chromeHeightDp else fallbackChrome
+    val showChrome = chrome || tabletop
+    val reservedChrome = if (showChrome) {
+        if (chromeHeightDp > 0.dp) chromeHeightDp else fallbackChrome
+    } else {
+        0.dp
+    }
     val readerPadding = PaddingValues(
         start = settings.marginDp.dp + safeDrawing.calculateStartPadding(layoutDirection),
         end = settings.marginDp.dp + safeDrawing.calculateEndPadding(layoutDirection),
         top = if (tabletop) {
             safeDrawing.calculateTopPadding() + settings.marginDp.dp
-        } else {
+        } else if (showChrome) {
             reservedChrome
+        } else {
+            safeDrawing.calculateTopPadding() + settings.marginDp.dp
         },
         bottom = if (tabletop) {
-            reservedChrome
+            if (showChrome) reservedChrome else safeDrawing.calculateBottomPadding() + settings.marginDp.dp
         } else {
             safeDrawing.calculateBottomPadding() + settings.marginDp.dp
         },
@@ -230,6 +249,8 @@ fun ReaderPane(
                     onPage = vm::setPage,
                     onPagesReady = vm::updateReflowPages,
                     onToggleChrome = { chrome = !chrome },
+                    onPrevPage = vm::prevPage,
+                    onNextPage = vm::nextPage,
                     onCycleColor = { vm.cycleColorMode() },
                     onSeekSentence = { sentenceId ->
                         val index = (opened as OpenedBook.Reflow).sentences.indexOfFirst { it.id == sentenceId }
@@ -256,6 +277,8 @@ fun ReaderPane(
                         vm.setPage(it)
                     },
                     onToggleChrome = { chrome = !chrome },
+                    onPrevPage = vm::prevPage,
+                    onNextPage = vm::nextPage,
                     onCycleColor = { vm.cycleColorMode() },
                     onBrightnessDrag = { delta ->
                         if (!settings.useSystemBrightness) {
@@ -276,14 +299,13 @@ fun ReaderPane(
             )
         }
 
-        val showChrome = chrome || tabletop
         if (showChrome) {
             val chromeInsets = if (tabletop) {
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
             } else {
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             }
-            Column(
+            Box(
                 Modifier
                     .align(if (tabletop) Alignment.BottomCenter else Alignment.TopCenter)
                     .fillMaxWidth()
@@ -293,10 +315,20 @@ fun ReaderPane(
                             chromeHeightDp = height
                         }
                     }
-                    .background(chromeColor.copy(alpha = 0.96f))
-                    .windowInsetsPadding(chromeInsets)
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                    .windowInsetsPadding(chromeInsets),
             ) {
+                Image(
+                    painter = painterResource(R.drawable.menu_papyrus),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize(),
+                )
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0x99F3E2C4))
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (onBack != null) {
                         IconButton(onClick = onBack) {
@@ -390,40 +422,72 @@ fun ReaderPane(
                 )
             }
         }
+        }
 
         if (showSettings) {
             ModalBottomSheet(
                 onDismissRequest = { closeSettings() },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = MaterialTheme.colorScheme.surface,
+                containerColor = Color.Transparent,
+                dragHandle = null,
             ) {
-                ReadingSettingsSheet(
-                    settings = settings,
-                    engines = engines,
-                    voices = voices,
-                    isPdf = opened is OpenedBook.Pdf,
-                    onChange = vm::updateSettings,
-                    onEngine = { engine ->
-                        vm.updateSettings { it.copy(ttsEngine = engine, ttsVoice = "") }
-                        vm.reloadVoices(engine)
-                    },
-                    onVoice = { voice ->
-                        vm.updateSettings { it.copy(ttsVoice = voice) }
-                        vm.previewVoice(voice)
-                    },
-                    onClose = { closeSettings() },
-                )
+                Box(Modifier.fillMaxWidth()) {
+                    Image(
+                        painter = painterResource(R.drawable.menu_papyrus),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xAAF3E2C4)),
+                    ) {
+                    ReadingSettingsSheet(
+                        settings = settings,
+                        engines = engines,
+                        voices = voices,
+                        isPdf = opened is OpenedBook.Pdf,
+                        onChange = { transform ->
+                            vm.updateSettings(transform)
+                        },
+                        onTtsPreview = { vm.previewTtsSettings() },
+                        onEngine = { engine ->
+                            vm.updateSettings { it.copy(ttsEngine = engine, ttsVoice = "") }
+                            vm.reloadVoices(engine)
+                        },
+                        onVoice = { voice ->
+                            vm.updateSettings { it.copy(ttsVoice = voice) }
+                            vm.previewVoice(voice)
+                        },
+                        onClose = { closeSettings() },
+                    )
+                    }
+                }
             }
         }
 
         if (showToc) {
             ModalBottomSheet(
                 onDismissRequest = { showToc = false },
-                containerColor = MaterialTheme.colorScheme.surface,
+                containerColor = Color.Transparent,
+                dragHandle = null,
             ) {
+                Box(Modifier.fillMaxWidth()) {
+                    Image(
+                        painter = painterResource(R.drawable.menu_papyrus),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xAAF3E2C4)),
+                    ) {
                 Text(
                     stringResource(R.string.contents),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = Color(0xFF3B2A1A),
                     modifier = Modifier.padding(16.dp),
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -455,8 +519,9 @@ fun ReaderPane(
                     else -> Unit
                 }
             }
-        }
-
+                    }
+                }
+            }
         if (showBookmarkHint) {
             AlertDialog(
                 onDismissRequest = {
@@ -554,6 +619,8 @@ private fun ReflowReader(
     onPage: (Int) -> Unit,
     onPagesReady: (List<ReflowPage>) -> Unit,
     onToggleChrome: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
     onCycleColor: () -> Unit,
     onSeekSentence: (Int) -> Unit,
     onBrightnessDrag: (Float) -> Unit,
@@ -564,6 +631,7 @@ private fun ReflowReader(
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     val localTextStyle = LocalTextStyle.current
+    val scope = rememberCoroutineScope()
     Box(Modifier.fillMaxSize()) {
         BoxWithConstraints(
             Modifier
@@ -636,40 +704,85 @@ private fun ReflowReader(
                     val target = pages.indexOfFirst { it.containsText(highlight) }
                     if (target >= 0 && pagerState.currentPage != target) pagerState.scrollToPage(target)
                 }
-                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-                    val current = pages.getOrNull(page) ?: return@HorizontalPager
-                    Column(
-                        Modifier
-                            .fillMaxSize()
-                            .pointerInput(Unit) {
-                                detectTapGestures(onTap = { onToggleChrome() })
-                            },
-                    ) {
-                        current.blocks.forEachIndexed { index, block ->
-                            val highlighted = highlight?.takeIf { h ->
-                                block.text.contains(h) || block.sentences.any { it.text == h }
+                val chapterEdgeScroll = remember(pages.size) {
+                    object : NestedScrollConnection {
+                        override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                            val atStart = pagerState.currentPage <= 0
+                            val atEnd = pagerState.currentPage >= pages.lastIndex.coerceAtLeast(0)
+                            return when {
+                                available.x < -800f && atEnd -> {
+                                    onNextPage()
+                                    available
+                                }
+                                available.x > 800f && atStart -> {
+                                    onPrevPage()
+                                    available
+                                }
+                                else -> Velocity.Zero
                             }
-                            val style = if (block.isTitle) titleStyle else bodyStyle
-                            var layout by remember(page, index, block.text) { mutableStateOf<TextLayoutResult?>(null) }
-                            Text(
-                                text = annotatedParagraph(block.text, highlighted, palette),
-                                style = style,
-                                onTextLayout = { layout = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = if (block.isTitle) TitleBlockSpacing else settings.paragraphSpacingSp.dp)
-                                    .pointerInput(block.sentences, block.text) {
-                                        detectTapGestures(
-                                            onTap = { onToggleChrome() },
-                                            onLongPress = { offset ->
-                                                val pos = layout?.getOffsetForPosition(offset) ?: return@detectTapGestures
-                                                val sentence = sentenceAtOffset(block.text, block.sentences, pos)
-                                                if (sentence != null) onSeekSentence(sentence.id)
-                                            },
-                                        )
-                                    },
-                            )
                         }
+                    }
+                }
+                HorizontalPager(
+                    state = pagerState,
+                    userScrollEnabled = true,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(chapterEdgeScroll),
+                ) { page ->
+                    val current = pages.getOrNull(page) ?: return@HorizontalPager
+                    Box(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize()) {
+                            current.blocks.forEachIndexed { index, block ->
+                                val highlighted = highlight?.takeIf { h ->
+                                    block.text.contains(h) || block.sentences.any { it.text == h }
+                                }
+                                val style = if (block.isTitle) titleStyle else bodyStyle
+                                Text(
+                                    text = annotatedParagraph(block.text, highlighted, palette),
+                                    style = style,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = if (block.isTitle) TitleBlockSpacing else settings.paragraphSpacingSp.dp),
+                                )
+                            }
+                        }
+                        // Full-page tap layer above text so left/right/double-tap always work
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .pointerInput(pagerState.currentPage, pages.size) {
+                                    detectTapGestures(
+                                        onDoubleTap = { onToggleChrome() },
+                                        onTap = { offset ->
+                                            val w = size.width.toFloat().coerceAtLeast(1f)
+                                            when {
+                                                offset.x < w * 0.4f -> {
+                                                    if (pagerState.currentPage > 0) {
+                                                        scope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                        }
+                                                    } else {
+                                                        onPrevPage()
+                                                    }
+                                                }
+                                                offset.x > w * 0.6f -> {
+                                                    if (pagerState.currentPage < pages.lastIndex) {
+                                                        scope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                        }
+                                                    } else {
+                                                        onNextPage()
+                                                    }
+                                                }
+                                                else -> {
+                                                    // Middle single tap: do nothing (double tap toggles chrome)
+                                                }
+                                            }
+                                        },
+                                    )
+                                },
+                        )
                     }
                 }
             }
@@ -687,10 +800,13 @@ private fun PdfReader(
     contentPadding: PaddingValues,
     onPage: (Int) -> Unit,
     onToggleChrome: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
     onCycleColor: () -> Unit,
     onBrightnessDrag: (Float) -> Unit,
 ) {
     val pagerState = rememberPagerState(initialPage = pageIndex, pageCount = { pdf.pageCount })
+    val scope = rememberCoroutineScope()
     LaunchedEffect(pageIndex) {
         if (pagerState.currentPage != pageIndex) pagerState.scrollToPage(pageIndex)
     }
@@ -700,24 +816,59 @@ private fun PdfReader(
     val palette = settings.palette
     val filter = pdfColorFilter(settings.colorMode)
     Box(Modifier.fillMaxSize()) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
+        Box(
+            Modifier
                 .fillMaxSize()
                 .padding(contentPadding),
-        ) { page ->
-            if (uri != null) {
-                PdfPageImage(
-                    uri = uri,
-                    page = page,
-                    colorFilter = filter,
-                    contentDescription = stringResource(R.string.page_n, page + 1, pdf.pageCount),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable { onToggleChrome() }
-                        .background(palette.background),
-                )
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                if (uri != null) {
+                    PdfPageImage(
+                        uri = uri,
+                        page = page,
+                        colorFilter = filter,
+                        contentDescription = stringResource(R.string.page_n, page + 1, pdf.pageCount),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(palette.background),
+                    )
+                }
             }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(pagerState.currentPage, pdf.pageCount) {
+                        detectTapGestures(
+                            onDoubleTap = { onToggleChrome() },
+                            onTap = { offset ->
+                                val w = size.width.toFloat().coerceAtLeast(1f)
+                                when {
+                                    offset.x < w * 0.4f -> {
+                                        if (pagerState.currentPage > 0) {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                            }
+                                        } else {
+                                            onPrevPage()
+                                        }
+                                    }
+                                    offset.x > w * 0.6f -> {
+                                        if (pagerState.currentPage < pdf.pageCount - 1) {
+                                            scope.launch {
+                                                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                            }
+                                        } else {
+                                            onNextPage()
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    },
+            )
         }
         if (settings.colorMode != ColorMode.Day) {
             Box(
@@ -740,8 +891,7 @@ private fun EdgeGestures(onCycleColor: () -> Unit, onBrightnessDrag: (Float) -> 
                 detectVerticalDragGestures(
                     onVerticalDrag = { _, dragAmount -> onBrightnessDrag(dragAmount) },
                 )
-            }
-            .clickable { onCycleColor() },
+            },
     )
 }
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Readage</string>
+    <string name="app_name">Readify</string>
     <string name="library_title">Kütüphane</string>
     <string name="library_empty">Henüz kitap yok.\nDosya veya klasör ekleyerek başlayın.</string>
     <string name="add_files">Dosya ekle</string>
@@ -96,4 +96,7 @@
     <string name="format_epub">EPUB</string>
     <string name="format_pdf">PDF</string>
     <string name="format_txt">TXT</string>
+
+    <string name="selection_count">%1$d seçili</string>
+    <string name="remove_books_confirm">Seçili %1$d kitabı kütüphaneden kaldırmak istiyor musunuz?</string>
 </resources>

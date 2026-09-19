@@ -10,9 +10,9 @@ import java.nio.charset.Charset
 import java.util.zip.ZipFile
 
 class EpubParser(private val context: Context) {
-    fun parseMeta(uri: Uri, cacheKey: String): BookMeta {
+    fun parseMeta(uri: Uri, cacheKey: String, fallbackTitle: String? = null): BookMeta {
         return withZip(uri, cacheKey) { zip ->
-            val opf = readOpf(zip)
+            val opf = readOpf(zip, fallbackTitle)
             val title = opf.title
             val author = opf.author
             val cover = opf.coverHref?.let { href ->
@@ -24,9 +24,9 @@ class EpubParser(private val context: Context) {
         }
     }
 
-    fun open(uri: Uri, cacheKey: String): OpenedBook.Reflow {
+    fun open(uri: Uri, cacheKey: String, fallbackTitle: String? = null): OpenedBook.Reflow {
         return withZip(uri, cacheKey) { zip ->
-            val opf = readOpf(zip)
+            val opf = readOpf(zip, fallbackTitle)
             val chapters = mutableListOf<ChapterContent>()
             val allSentences = mutableListOf<Sentence>()
             opf.spineHrefs.forEachIndexed { index, href ->
@@ -77,7 +77,7 @@ class EpubParser(private val context: Context) {
         val spineHrefs: List<String>,
     )
 
-    private fun readOpf(zip: ZipFile): Opf {
+    private fun readOpf(zip: ZipFile, fallbackTitle: String? = null): Opf {
         val containerXml = zip.read("META-INF/container.xml")
             ?: error("EPUB container.xml missing")
         val container = Jsoup.parse(containerXml, "", Parser.xmlParser())
@@ -88,9 +88,24 @@ class EpubParser(private val context: Context) {
         }
         val opfXml = zip.read(opfPath) ?: error("OPF missing")
         val opf = Jsoup.parse(opfXml, "", Parser.xmlParser())
-        val title = opf.getElementsByTag("title").first()?.text()?.ifBlank { null }
-            ?: File(opfPath).nameWithoutExtension
-        val author = opf.getElementsByTag("creator").first()?.text()?.ifBlank { null }
+        // Prefer Dublin Core titles; bare getElementsByTag("title") often misses dc:title,
+        // then File(".../content.opf").nameWithoutExtension wrongly becomes "content".
+        val fromMeta = listOf(
+            opf.selectFirst("metadata > dc|title"),
+            opf.selectFirst("dc|title"),
+            opf.selectFirst("metadata title"),
+        ).firstNotNullOfOrNull { el -> el?.text()?.trim()?.ifBlank { null } }
+        val fromOpfFile = opfPath.substringAfterLast('/').substringBeforeLast('.')
+            .takeUnless { it.equals("content", ignoreCase = true) || it.isBlank() }
+        val fromFallback = fallbackTitle?.trim()?.takeUnless {
+            it.isBlank() || it.equals("content", ignoreCase = true)
+        }
+        val title = fromMeta ?: fromFallback ?: fromOpfFile ?: "EPUB"
+        val author = listOf(
+            opf.selectFirst("metadata > dc|creator"),
+            opf.selectFirst("dc|creator"),
+            opf.selectFirst("metadata creator"),
+        ).firstNotNullOfOrNull { el -> el?.text()?.trim()?.ifBlank { null } }
         val manifest = opf.select("manifest > item").associate { item ->
             item.attr("id") to resolve(opfDir, item.attr("href"))
         }

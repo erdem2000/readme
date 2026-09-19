@@ -16,6 +16,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
@@ -46,6 +47,7 @@ fun ReadingSettingsSheet(
     voices: List<TtsVoiceOption>,
     isPdf: Boolean,
     onChange: ((ReadingSettings) -> ReadingSettings) -> Unit,
+    onTtsPreview: () -> Unit = {},
     onEngine: (String) -> Unit,
     onVoice: (String) -> Unit,
     onClose: () -> Unit,
@@ -98,6 +100,8 @@ fun ReadingSettingsSheet(
             valueRange = 0.02f..1f,
             enabled = !settings.useSystemBrightness,
         )
+
+        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = muted.copy(alpha = 0.35f))
 
         if (isPdf) {
             Text(stringResource(R.string.pdf_font_hint), color = muted)
@@ -163,6 +167,8 @@ fun ReadingSettingsSheet(
             )
         }
 
+        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = muted.copy(alpha = 0.35f))
+
         Label(stringResource(R.string.tts_engine))
         if (engines.isEmpty()) {
             Text(stringResource(R.string.tts_no_engines), color = muted)
@@ -189,12 +195,14 @@ fun ReadingSettingsSheet(
         Slider(
             value = settings.ttsSpeed,
             onValueChange = { value -> onChange { it.copy(ttsSpeed = value) } },
+            onValueChangeFinished = onTtsPreview,
             valueRange = 0.6f..2.0f,
         )
         Label(stringResource(R.string.tts_pitch))
         Slider(
             value = settings.ttsPitch,
             onValueChange = { value -> onChange { it.copy(ttsPitch = value) } },
+            onValueChangeFinished = onTtsPreview,
             valueRange = 0.7f..1.4f,
         )
         Text(

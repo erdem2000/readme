@@ -147,7 +147,7 @@ class LibraryRepository(
                 id = id,
                 uri = uri.toString(),
                 displayName = name,
-                title = meta.title.ifBlank { name },
+                title = resolveTitle(meta.title, name),
                 author = meta.author,
                 format = meta.format.key,
                 coverPath = coverPath ?: existing?.coverPath,
@@ -176,4 +176,29 @@ class LibraryRepository(
         val digest = MessageDigest.getInstance("SHA-256").digest(uri.toString().toByteArray())
         return digest.joinToString("") { "%02x".format(it) }.take(16)
     }
+
+    private fun resolveTitle(metaTitle: String?, fileName: String): String {
+        val stem = fileName.substringBeforeLast('.').ifBlank { fileName }
+        val cleanedMeta = metaTitle?.trim()?.takeUnless {
+            it.isBlank() || it.equals("content", ignoreCase = true)
+        }
+        val cleanedStem = stem.takeUnless { it.equals("content", ignoreCase = true) } ?: fileName
+        return cleanedMeta ?: cleanedStem
+    }
+
+    /** Fix existing library rows whose title was wrongly saved as "content". */
+    suspend fun repairContentTitles() = withContext(Dispatchers.IO) {
+        dao.getAllBooks()
+            .filter { it.title.equals("content", ignoreCase = true) }
+            .forEach { book ->
+                val uri = Uri.parse(book.uri)
+                val name = runCatching { parser.queryName(uri) }.getOrDefault(book.displayName)
+                val metaTitle = runCatching { parser.parseMeta(uri, book.id).title }.getOrNull()
+                val fixed = resolveTitle(metaTitle, name)
+                if (!fixed.equals("content", ignoreCase = true) && fixed != book.title) {
+                    dao.updateTitle(book.id, fixed, name)
+                }
+            }
+    }
+
 }

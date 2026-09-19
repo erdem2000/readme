@@ -46,6 +46,12 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +96,8 @@ fun LibraryPane(
     val shelves by viewModel.collectionShelves.collectAsStateWithLifecycle()
     val viewMode by viewModel.viewMode.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
+    val selectionMode by viewModel.selectionMode.collectAsStateWithLifecycle()
+    val selectedIds by viewModel.selectedIds.collectAsStateWithLifecycle()
     val openDocs = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
@@ -110,7 +118,43 @@ fun LibraryPane(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.library_title)) })
+            if (selectionMode) {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.selection_count, selectedIds.size)) },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
+                            Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.cancel))
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = { showAddToCollection = true },
+                            enabled = selectedIds.isNotEmpty(),
+                        ) {
+                            Icon(Icons.AutoMirrored.Outlined.PlaylistAdd, contentDescription = stringResource(R.string.add_to_collection))
+                        }
+                        val shelfCollection = actionCollection
+                        if (viewMode == LibraryViewMode.Collections && shelfCollection != null) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.removeSelectedFromCollection(shelfCollection.id)
+                                },
+                                enabled = selectedIds.isNotEmpty(),
+                            ) {
+                                Text(stringResource(R.string.remove_from_collection))
+                            }
+                        }
+                        IconButton(
+                            onClick = { confirmRemove = true },
+                            enabled = selectedIds.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.remove_from_library))
+                        }
+                    },
+                )
+            } else {
+                TopAppBar(title = { Text(stringResource(R.string.library_title)) })
+            }
         },
     ) { padding ->
         Column(
@@ -203,8 +247,11 @@ fun LibraryPane(
                                     title = stringResource(R.string.shelf_all),
                                     books = books,
                                     selectedId = selectedId,
+                                    selectionMode = selectionMode,
+                                    selectedIds = selectedIds,
                                     onOpen = onOpen,
-                                    onLongPress = { actionBook = it },
+                                    onLongPress = { viewModel.startSelection(it.id) },
+                                    onToggleSelect = { viewModel.toggleSelected(it) },
                                 )
                             }
                             item {
@@ -212,8 +259,11 @@ fun LibraryPane(
                                     title = stringResource(R.string.shelf_reading),
                                     books = books.filter { it.status == ReadStatus.Reading },
                                     selectedId = selectedId,
+                                    selectionMode = selectionMode,
+                                    selectedIds = selectedIds,
                                     onOpen = onOpen,
-                                    onLongPress = { actionBook = it },
+                                    onLongPress = { viewModel.startSelection(it.id) },
+                                    onToggleSelect = { viewModel.toggleSelected(it) },
                                 )
                             }
                             item {
@@ -221,8 +271,11 @@ fun LibraryPane(
                                     title = stringResource(R.string.shelf_unread),
                                     books = books.filter { it.status == ReadStatus.Unread },
                                     selectedId = selectedId,
+                                    selectionMode = selectionMode,
+                                    selectedIds = selectedIds,
                                     onOpen = onOpen,
-                                    onLongPress = { actionBook = it },
+                                    onLongPress = { viewModel.startSelection(it.id) },
+                                    onToggleSelect = { viewModel.toggleSelected(it) },
                                 )
                             }
                             item {
@@ -230,8 +283,11 @@ fun LibraryPane(
                                     title = stringResource(R.string.shelf_read),
                                     books = books.filter { it.status == ReadStatus.Read },
                                     selectedId = selectedId,
+                                    selectionMode = selectionMode,
+                                    selectedIds = selectedIds,
                                     onOpen = onOpen,
-                                    onLongPress = { actionBook = it },
+                                    onLongPress = { viewModel.startSelection(it.id) },
+                                    onToggleSelect = { viewModel.toggleSelected(it) },
                                 )
                             }
                         }
@@ -252,11 +308,14 @@ fun LibraryPane(
                                             ?: stringResource(R.string.uncategorized),
                                         books = shelf.books,
                                         selectedId = selectedId,
+                                    selectionMode = selectionMode,
+                                    selectedIds = selectedIds,
                                         onOpen = onOpen,
                                         onLongPress = {
-                                            actionBook = it
                                             actionCollection = shelf.collection
+                                            viewModel.startSelection(it.id)
                                         },
+                                        onToggleSelect = { viewModel.toggleSelected(it) },
                                         onTitleLongPress = shelf.collection?.let { collection ->
                                             { confirmDeleteCollection = collection }
                                         },
@@ -271,7 +330,7 @@ fun LibraryPane(
     }
 
     val selectedBook = actionBook
-    if (selectedBook != null && !showAddToCollection && !confirmRemove) {
+    if (selectedBook != null && !selectionMode && !showAddToCollection && !confirmRemove) {
         ModalBottomSheet(onDismissRequest = {
             actionBook = null
             actionCollection = null
@@ -338,7 +397,7 @@ fun LibraryPane(
         }
     }
 
-    if (showAddToCollection && selectedBook != null) {
+    if (showAddToCollection && (selectedBook != null || (selectionMode && selectedIds.isNotEmpty()))) {
         AlertDialog(
             onDismissRequest = { showAddToCollection = false },
             title = { Text(stringResource(R.string.add_to_collection)) },
@@ -350,10 +409,14 @@ fun LibraryPane(
                         collections.forEach { collection ->
                             TextButton(
                                 onClick = {
-                                    viewModel.addToCollection(selectedBook.id, collection.id)
+                                    if (selectionMode && selectedIds.isNotEmpty()) {
+                                        viewModel.addSelectedToCollection(collection.id)
+                                    } else if (selectedBook != null) {
+                                        viewModel.addToCollection(selectedBook.id, collection.id)
+                                        actionBook = null
+                                        actionCollection = null
+                                    }
                                     showAddToCollection = false
-                                    actionBook = null
-                                    actionCollection = null
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
@@ -377,19 +440,31 @@ fun LibraryPane(
         )
     }
 
-    if (confirmRemove && selectedBook != null) {
+    if (confirmRemove && (selectedBook != null || (selectionMode && selectedIds.isNotEmpty()))) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
             title = { Text(stringResource(R.string.remove_from_library)) },
-            text = { Text(stringResource(R.string.remove_book_confirm)) },
+            text = {
+                Text(
+                    if (selectionMode && selectedIds.isNotEmpty()) {
+                        stringResource(R.string.remove_books_confirm, selectedIds.size)
+                    } else {
+                        stringResource(R.string.remove_book_confirm)
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    val id = selectedBook.id
-                    viewModel.removeBook(id)
+                    if (selectionMode && selectedIds.isNotEmpty()) {
+                        viewModel.removeSelected { id -> onRemoved(id) }
+                    } else if (selectedBook != null) {
+                        val id = selectedBook.id
+                        viewModel.removeBook(id)
+                        actionBook = null
+                        actionCollection = null
+                        onRemoved(id)
+                    }
                     confirmRemove = false
-                    actionBook = null
-                    actionCollection = null
-                    onRemoved(id)
                 }) {
                     Text(stringResource(R.string.remove_from_library))
                 }
@@ -471,8 +546,11 @@ private fun BookshelfRow(
     title: String,
     books: List<BookEntity>,
     selectedId: String?,
+    selectionMode: Boolean,
+    selectedIds: Set<String>,
     onOpen: (String) -> Unit,
     onLongPress: (BookEntity) -> Unit,
+    onToggleSelect: (String) -> Unit,
     onTitleLongPress: (() -> Unit)? = null,
 ) {
     Column(
@@ -523,8 +601,14 @@ private fun BookshelfRow(
                             BookCoverCard(
                                 book = book,
                                 selected = book.id == selectedId,
-                                onClick = { onOpen(book.id) },
-                                onLongClick = { onLongPress(book) },
+                                checked = book.id in selectedIds,
+                                selectionMode = selectionMode,
+                                onClick = {
+                                    if (selectionMode) onToggleSelect(book.id) else onOpen(book.id)
+                                },
+                                onLongClick = {
+                                    if (selectionMode) onToggleSelect(book.id) else onLongPress(book)
+                                },
                             )
                         }
                     }
@@ -556,6 +640,8 @@ private fun BookshelfRow(
 private fun BookCoverCard(
     book: BookEntity,
     selected: Boolean,
+    checked: Boolean,
+    selectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -604,6 +690,26 @@ private fun BookCoverCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = ShelfWoodDark,
                     )
+                }
+            }
+            if (selectionMode) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(if (checked) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (checked) {
+                        Icon(
+                            Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Readage</string>
+    <string name="app_name">Readify</string>
     <string name="library_title">Library</string>
     <string name="library_empty">No books yet.\nAdd files or scan a folder to get started.</string>
     <string name="add_files">Add files</string>
@@ -96,4 +96,7 @@
     <string name="format_epub">EPUB</string>
     <string name="format_pdf">PDF</string>
     <string name="format_txt">TXT</string>
+
+    <string name="selection_count">%1$d selected</string>
+    <string name="remove_books_confirm">Remove %1$d selected books from the library?</string>
 </resources>
