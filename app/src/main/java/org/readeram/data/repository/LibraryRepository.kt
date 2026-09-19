@@ -10,11 +10,15 @@ import kotlinx.coroutines.withContext
 import org.readeram.data.local.BookDao
 import org.readeram.data.local.BookEntity
 import org.readeram.data.local.BookmarkEntity
+import org.readeram.data.local.CollectionBookCrossRef
+import org.readeram.data.local.CollectionEntity
+import org.readeram.data.local.ReadStatus
 import org.readeram.parser.BookFormat
 import org.readeram.parser.BookParser
 import org.readeram.parser.OpenedBook
 import java.io.File
 import java.security.MessageDigest
+import java.util.UUID
 
 class LibraryRepository(
     private val context: Context,
@@ -23,7 +27,11 @@ class LibraryRepository(
 ) {
     fun observeBooks(): Flow<List<BookEntity>> = dao.observeBooks()
     fun observeBook(id: String): Flow<BookEntity?> = dao.observeBook(id)
+    fun observeLatestBookmark(bookId: String): Flow<BookmarkEntity?> = dao.observeLatestBookmark(bookId)
+    fun observeCollections(): Flow<List<CollectionEntity>> = dao.observeCollections()
+    fun observeCollectionBooks(): Flow<List<CollectionBookCrossRef>> = dao.observeCollectionBooks()
     suspend fun getBook(id: String): BookEntity? = dao.getBook(id)
+    suspend fun getLatestBookmark(bookId: String): BookmarkEntity? = dao.getLatestBookmark(bookId)
 
     suspend fun importUris(uris: List<Uri>) {
         uris.forEach { importUri(it) }
@@ -37,6 +45,9 @@ class LibraryRepository(
 
     suspend fun open(id: String): OpenedBook {
         val book = dao.getBook(id) ?: error("Book not found")
+        if (book.status == ReadStatus.Unread) {
+            dao.updateReadStatus(id, ReadStatus.Reading.key)
+        }
         return withContext(Dispatchers.IO) {
             parser.open(Uri.parse(book.uri), id)
         }
@@ -46,7 +57,21 @@ class LibraryRepository(
         dao.updateProgress(id, position, progress.coerceIn(0f, 1f), System.currentTimeMillis())
     }
 
-    suspend fun addBookmark(id: String, position: String, label: String) {
+    suspend fun setReadStatus(id: String, status: ReadStatus) {
+        dao.updateReadStatus(id, status.key)
+    }
+
+    suspend fun removeBook(id: String) {
+        val book = dao.getBook(id)
+        dao.deleteBookmarks(id)
+        dao.delete(id)
+        book?.coverPath?.let { path ->
+            runCatching { File(path).delete() }
+        }
+    }
+
+    suspend fun saveBookmark(id: String, position: String, label: String) {
+        dao.deleteBookmarks(id)
         dao.insertBookmark(
             BookmarkEntity(
                 bookId = id,
@@ -55,6 +80,33 @@ class LibraryRepository(
                 createdAt = System.currentTimeMillis(),
             ),
         )
+    }
+
+    suspend fun createCollection(name: String): CollectionEntity {
+        val collection = CollectionEntity(
+            id = UUID.randomUUID().toString().take(16),
+            name = name.trim(),
+            createdAt = System.currentTimeMillis(),
+        )
+        dao.upsertCollection(collection)
+        return collection
+    }
+
+    suspend fun renameCollection(id: String, name: String) {
+        val current = dao.getCollection(id) ?: return
+        dao.upsertCollection(current.copy(name = name.trim()))
+    }
+
+    suspend fun deleteCollection(id: String) {
+        dao.deleteCollection(id)
+    }
+
+    suspend fun addToCollection(bookId: String, collectionId: String) {
+        dao.addToCollection(CollectionBookCrossRef(collectionId = collectionId, bookId = bookId))
+    }
+
+    suspend fun removeFromCollection(bookId: String, collectionId: String) {
+        dao.removeFromCollection(collectionId, bookId)
     }
 
     fun renderPdfPage(uri: Uri, page: Int) = parser.renderPdfPage(uri, page)
@@ -105,6 +157,7 @@ class LibraryRepository(
                 fileSize = parser.querySize(uri),
                 addedAt = existing?.addedAt ?: now,
                 lastOpenedAt = existing?.lastOpenedAt ?: 0L,
+                readStatus = existing?.readStatus ?: ReadStatus.Unread.key,
             ),
         )
     }

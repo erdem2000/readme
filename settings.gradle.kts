@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Readeram"
+rootProject.name = "Readage"
 include(":app")

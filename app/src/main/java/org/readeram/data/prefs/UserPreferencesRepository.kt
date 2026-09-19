@@ -39,6 +39,22 @@ class UserPreferencesRepository(context: Context) {
         )
     }
 
+    val bookmarkHintShown: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[BOOKMARK_HINT_SHOWN] ?: false
+    }
+
+    val libraryViewMode: Flow<String> = dataStore.data.map { prefs ->
+        prefs[LIBRARY_VIEW_MODE] ?: "shelves"
+    }
+
+    suspend fun setBookmarkHintShown() {
+        dataStore.edit { it[BOOKMARK_HINT_SHOWN] = true }
+    }
+
+    suspend fun setLibraryViewMode(mode: String) {
+        dataStore.edit { it[LIBRARY_VIEW_MODE] = mode }
+    }
+
     suspend fun update(transform: (ReadingSettings) -> ReadingSettings) {
         dataStore.edit { prefs ->
             val current = ReadingSettings(
@@ -90,5 +106,7 @@ class UserPreferencesRepository(context: Context) {
         val TTS_VOICE = stringPreferencesKey("tts_voice")
         val TTS_SPEED = floatPreferencesKey("tts_speed")
         val TTS_PITCH = floatPreferencesKey("tts_pitch")
+        val BOOKMARK_HINT_SHOWN = booleanPreferencesKey("bookmark_hint_shown")
+        val LIBRARY_VIEW_MODE = stringPreferencesKey("library_view_mode")
     }
 }

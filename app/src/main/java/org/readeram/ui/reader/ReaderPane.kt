@@ -2,8 +2,10 @@ package org.readeram.ui.reader
 
 import android.app.Activity
 import android.view.WindowManager
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,24 +35,29 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.List
-import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.KeyboardDoubleArrowLeft
 import androidx.compose.material.icons.outlined.KeyboardDoubleArrowRight
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -70,6 +78,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -91,7 +100,7 @@ import org.readeram.tts.TtsPlaybackState
 private val ReaderChromeContentHeight = 144.dp
 private val TitleBlockSpacing = 16.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReaderPane(
     bookId: String,
@@ -110,11 +119,19 @@ fun ReaderPane(
     val engines by vm.engines.collectAsStateWithLifecycle()
     val voices by vm.voices.collectAsStateWithLifecycle()
     val reflowPageCount by vm.reflowPageCount.collectAsStateWithLifecycle()
+    val latestBookmark by vm.latestBookmark.collectAsStateWithLifecycle()
+    val bookmarkHintShown by vm.bookmarkHintShown.collectAsStateWithLifecycle()
+    val userMessage by vm.userMessage.collectAsStateWithLifecycle()
     val palette = settings.palette
+    val chromeColor = MaterialTheme.colorScheme.surface
+    val chromeOn = MaterialTheme.colorScheme.onSurface
     var chrome by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
+    var showBookmarkHint by remember { mutableStateOf(false) }
+    var pendingBookmarkSave by remember { mutableStateOf<Boolean?>(null) }
     var chromeHeightDp by remember { mutableStateOf(0.dp) }
+    val snackbarHostState = remember { SnackbarHostState() }
     val activity = LocalContext.current as? Activity
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
@@ -161,15 +178,21 @@ fun ReaderPane(
         }
     }
 
-    DisposableEffect(palette.isDark) {
+    DisposableEffect(palette.isDark, tabletop) {
         val window = activity?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
-        controller?.isAppearanceLightStatusBars = !palette.isDark
-        controller?.isAppearanceLightNavigationBars = !palette.isDark
+        controller?.isAppearanceLightStatusBars = if (tabletop) !palette.isDark else true
+        controller?.isAppearanceLightNavigationBars = if (tabletop) true else !palette.isDark
         onDispose {
             controller?.isAppearanceLightStatusBars = true
             controller?.isAppearanceLightNavigationBars = true
         }
+    }
+
+    LaunchedEffect(userMessage) {
+        val res = userMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(activity?.getString(res) ?: return@LaunchedEffect)
+        vm.consumeMessage()
     }
 
     LaunchedEffect(tts.sentenceIndex, tts.bookId) {
@@ -270,41 +293,65 @@ fun ReaderPane(
                             chromeHeightDp = height
                         }
                     }
-                    .background(palette.chrome.copy(alpha = 0.96f))
+                    .background(chromeColor.copy(alpha = 0.96f))
                     .windowInsetsPadding(chromeInsets)
                     .padding(horizontal = 4.dp, vertical = 6.dp),
             ) {
-                if (!tabletop) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (onBack != null) {
-                            IconButton(onClick = onBack) {
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.ArrowBack,
-                                    contentDescription = stringResource(R.string.back),
-                                    tint = palette.onChrome,
-                                )
-                            }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = stringResource(R.string.back),
+                                tint = chromeOn,
+                            )
                         }
-                        Text(
-                            book?.title ?: "",
-                            color = palette.onChrome,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f),
+                    }
+                    Text(
+                        book?.title ?: "",
+                        color = chromeOn,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { showToc = true }) {
+                        Icon(Icons.AutoMirrored.Outlined.List, stringResource(R.string.contents), tint = chromeOn)
+                    }
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .combinedClickable(
+                                onClick = {
+                                    if (!bookmarkHintShown) {
+                                        pendingBookmarkSave = false
+                                        showBookmarkHint = true
+                                    } else {
+                                        vm.goToBookmark()
+                                    }
+                                },
+                                onLongClick = {
+                                    if (!bookmarkHintShown) {
+                                        pendingBookmarkSave = true
+                                        showBookmarkHint = true
+                                    } else {
+                                        vm.saveBookmark()
+                                    }
+                                },
+                                role = Role.Button,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (latestBookmark != null) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            contentDescription = stringResource(R.string.bookmark),
+                            tint = chromeOn,
                         )
-                        IconButton(onClick = { showToc = true }) {
-                            Icon(Icons.AutoMirrored.Outlined.List, stringResource(R.string.contents), tint = palette.onChrome)
-                        }
-                        IconButton(onClick = { vm.addBookmark() }) {
-                            Icon(Icons.Outlined.BookmarkAdd, stringResource(R.string.bookmark), tint = palette.onChrome)
-                        }
-                        IconButton(onClick = { openSettings() }) {
-                            Icon(Icons.Outlined.Tune, stringResource(R.string.reading_settings), tint = palette.onChrome)
-                        }
+                    }
+                    IconButton(onClick = { openSettings() }) {
+                        Icon(Icons.Outlined.Tune, stringResource(R.string.reading_settings), tint = chromeOn)
                     }
                 }
                 TtsBar(
                     state = tts.takeIf { it.bookId == bookId } ?: TtsPlaybackState(),
-                    palette = palette,
                     onPlay = { vm.playTts() },
                     onPause = vm::pauseTts,
                     onResume = vm::resumeTts,
@@ -313,7 +360,6 @@ fun ReaderPane(
                     onNextSentence = vm::nextSentence,
                     onPrevPage = vm::prevPage,
                     onNextPage = vm::nextPage,
-                    onSettings = { openSettings() },
                 )
                 val pageLabel = when (val o = opened) {
                     is OpenedBook.Reflow -> stringResource(R.string.page_n, pageIndex + 1, reflowPageCount.coerceAtLeast(1))
@@ -323,7 +369,7 @@ fun ReaderPane(
                 if (pageLabel.isNotEmpty()) {
                     Text(
                         pageLabel,
-                        color = palette.onChrome,
+                        color = chromeOn,
                         modifier = Modifier
                             .align(Alignment.CenterHorizontally)
                             .padding(bottom = 2.dp),
@@ -339,8 +385,8 @@ fun ReaderPane(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 4.dp),
-                    color = palette.onChrome,
-                    trackColor = palette.onChrome.copy(alpha = 0.2f),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = chromeOn.copy(alpha = 0.2f),
                 )
             }
         }
@@ -349,7 +395,7 @@ fun ReaderPane(
             ModalBottomSheet(
                 onDismissRequest = { closeSettings() },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = palette.chrome,
+                containerColor = MaterialTheme.colorScheme.surface,
             ) {
                 ReadingSettingsSheet(
                     settings = settings,
@@ -371,10 +417,13 @@ fun ReaderPane(
         }
 
         if (showToc) {
-            ModalBottomSheet(onDismissRequest = { showToc = false }, containerColor = palette.chrome) {
+            ModalBottomSheet(
+                onDismissRequest = { showToc = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
                 Text(
                     stringResource(R.string.contents),
-                    color = palette.onChrome,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(16.dp),
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -384,7 +433,7 @@ fun ReaderPane(
                             itemsIndexed(o.chapters) { index, chapter ->
                                 Text(
                                     chapter.title,
-                                    color = palette.onChrome,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
@@ -399,7 +448,7 @@ fun ReaderPane(
                     is OpenedBook.Pdf -> {
                         Text(
                             stringResource(R.string.page_n, pageIndex + 1, o.pageCount),
-                            color = palette.onChrome,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.padding(16.dp),
                         )
                     }
@@ -407,13 +456,46 @@ fun ReaderPane(
                 }
             }
         }
+
+        if (showBookmarkHint) {
+            AlertDialog(
+                onDismissRequest = {
+                    showBookmarkHint = false
+                    vm.markBookmarkHintShown()
+                    pendingBookmarkSave = null
+                },
+                title = { Text(stringResource(R.string.bookmark_hint_title)) },
+                text = { Text(stringResource(R.string.bookmark_hint_message)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val save = pendingBookmarkSave
+                        showBookmarkHint = false
+                        pendingBookmarkSave = null
+                        vm.markBookmarkHintShown()
+                        when (save) {
+                            true -> vm.saveBookmark()
+                            false -> vm.goToBookmark()
+                            null -> Unit
+                        }
+                    }) {
+                        Text(stringResource(R.string.got_it))
+                    }
+                },
+            )
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (tabletop) reservedChrome + 8.dp else 32.dp),
+        )
     }
 }
 
 @Composable
 private fun TtsBar(
     state: TtsPlaybackState,
-    palette: ReadingPalette,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -422,21 +504,18 @@ private fun TtsBar(
     onNextSentence: () -> Unit,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
-    onSettings: () -> Unit,
 ) {
+    val tint = MaterialTheme.colorScheme.onSurface
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        IconButton(onClick = onSettings) {
-            Icon(Icons.Outlined.Settings, stringResource(R.string.tts_title), tint = palette.onChrome)
-        }
         IconButton(onClick = onPrevPage) {
-            Icon(Icons.Outlined.KeyboardDoubleArrowLeft, stringResource(R.string.prev_page), tint = palette.onChrome)
+            Icon(Icons.Outlined.KeyboardDoubleArrowLeft, stringResource(R.string.prev_page), tint = tint)
         }
         IconButton(onClick = onPrevSentence) {
-            Icon(Icons.Outlined.SkipPrevious, stringResource(R.string.prev_sentence), tint = palette.onChrome)
+            Icon(Icons.Outlined.SkipPrevious, stringResource(R.string.prev_sentence), tint = tint)
         }
         IconButton(
             onClick = {
@@ -450,17 +529,17 @@ private fun TtsBar(
             Icon(
                 if (state.playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
                 stringResource(R.string.tts_play),
-                tint = palette.onChrome,
+                tint = tint,
             )
         }
         IconButton(onClick = onNextSentence) {
-            Icon(Icons.Outlined.SkipNext, stringResource(R.string.next_sentence), tint = palette.onChrome)
+            Icon(Icons.Outlined.SkipNext, stringResource(R.string.next_sentence), tint = tint)
         }
         IconButton(onClick = onNextPage) {
-            Icon(Icons.Outlined.KeyboardDoubleArrowRight, stringResource(R.string.next_page), tint = palette.onChrome)
+            Icon(Icons.Outlined.KeyboardDoubleArrowRight, stringResource(R.string.next_page), tint = tint)
         }
         IconButton(onClick = onStop) {
-            Icon(Icons.Outlined.Stop, stringResource(R.string.tts_stop), tint = palette.onChrome)
+            Icon(Icons.Outlined.Stop, stringResource(R.string.tts_stop), tint = tint)
         }
     }
 }

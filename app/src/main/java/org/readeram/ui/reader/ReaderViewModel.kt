@@ -43,6 +43,12 @@ class ReaderViewModel(
     val settings: StateFlow<ReadingSettings> = prefs.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadingSettings())
 
+    val latestBookmark = library.observeLatestBookmark(bookId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val bookmarkHintShown: StateFlow<Boolean> = prefs.bookmarkHintShown
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val ttsState = TtsSession.state
 
     private val _opened = MutableStateFlow<OpenedBook?>(null)
@@ -65,6 +71,9 @@ class ReaderViewModel(
 
     private val _reflowPageCount = MutableStateFlow(1)
     val reflowPageCount: StateFlow<Int> = _reflowPageCount
+
+    private val _userMessage = MutableStateFlow<Int?>(null)
+    val userMessage: StateFlow<Int?> = _userMessage
 
     init {
         viewModelScope.launch {
@@ -143,15 +152,36 @@ class ReaderViewModel(
         }
     }
 
-    fun addBookmark() {
+    fun saveBookmark() {
         viewModelScope.launch {
             val label = when (val opened = _opened.value) {
                 is OpenedBook.Reflow -> opened.chapters.getOrNull(_chapterIndex.value)?.title.orEmpty()
                 is OpenedBook.Pdf -> "p${_pageIndex.value + 1}"
                 null -> ""
             }
-            library.addBookmark(bookId, currentPosition(), label)
+            library.saveBookmark(bookId, currentPosition(), label)
+            _userMessage.value = org.readeram.R.string.bookmark_added
         }
+    }
+
+    fun goToBookmark() {
+        viewModelScope.launch {
+            val bookmark = library.getLatestBookmark(bookId)
+            if (bookmark == null) {
+                _userMessage.value = org.readeram.R.string.bookmark_empty
+                return@launch
+            }
+            applyPosition(bookmark.position)
+            persist()
+        }
+    }
+
+    fun consumeMessage() {
+        _userMessage.value = null
+    }
+
+    fun markBookmarkHintShown() {
+        viewModelScope.launch { prefs.setBookmarkHintShown() }
     }
 
     fun playTts(startIndex: Int? = null) {
@@ -343,15 +373,20 @@ class ReaderViewModel(
     }
 
     private fun restorePosition(opened: OpenedBook) {
-        val raw = book.value?.lastPosition ?: return
+        applyPosition(book.value?.lastPosition ?: return, opened)
+    }
+
+    private fun applyPosition(raw: String, opened: OpenedBook? = _opened.value) {
+        val current = opened ?: return
         val parts = raw.split(':')
-        when (opened) {
+        when (current) {
             is OpenedBook.Reflow -> {
-                _chapterIndex.value = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, opened.chapters.lastIndex) ?: 0
+                _chapterIndex.value = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, current.chapters.lastIndex) ?: 0
                 _pageIndex.value = parts.getOrNull(2)?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                pinToLastReflowPage = false
             }
             is OpenedBook.Pdf -> {
-                _pageIndex.value = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, opened.pageCount - 1) ?: 0
+                _pageIndex.value = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, current.pageCount - 1) ?: 0
             }
         }
     }

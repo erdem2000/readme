@@ -67,6 +67,9 @@ fun ReaderamApp() {
                                 navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, id)
                             }
                         },
+                        onRemoved = { id ->
+                            if (selectedId == id) selectedId = null
+                        },
                     )
                 }
             },

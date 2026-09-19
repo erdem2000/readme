@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Readeram</string>
+    <string name="app_name">Readage</string>
     <string name="library_title">Kütüphane</string>
     <string name="library_empty">Henüz kitap yok.\nDosya veya klasör ekleyerek başlayın.</string>
     <string name="add_files">Dosya ekle</string>
@@ -56,6 +56,32 @@
     <string name="contents">İçindekiler</string>
     <string name="bookmark">Yer imi</string>
     <string name="bookmark_added">Yer imi eklendi</string>
+    <string name="bookmark_empty">Kayıtlı yer imi yok. Bu sayfayı kaydetmek için düğmeye uzun basın.</string>
+    <string name="bookmark_hint_title">Yer imi nasıl kullanılır</string>
+    <string name="bookmark_hint_message">Kısa basış kayıtlı sayfaya gider.\nUzun basış bulunduğunuz sayfayı kaydeder.</string>
+    <string name="got_it">Anladım</string>
+    <string name="view_shelves">Raflar</string>
+    <string name="view_collections">Koleksiyonlar</string>
+    <string name="shelf_all">Hepsi</string>
+    <string name="shelf_reading">Okunmakta olanlar</string>
+    <string name="shelf_unread">Okunmayanlar</string>
+    <string name="shelf_read">Okunanlar</string>
+    <string name="shelf_empty">Bu rafta henüz kitap yok</string>
+    <string name="uncategorized">Koleksiyonsuz</string>
+    <string name="new_collection">Yeni koleksiyon</string>
+    <string name="collection_name">Koleksiyon adı</string>
+    <string name="create">Oluştur</string>
+    <string name="cancel">Vazgeç</string>
+    <string name="add_to_collection">Koleksiyona ekle</string>
+    <string name="remove_from_collection">Koleksiyondan çıkar</string>
+    <string name="delete_collection">Koleksiyonu sil</string>
+    <string name="mark_read">Okundu</string>
+    <string name="mark_unread">Okunmadı</string>
+    <string name="remove_from_library">Kütüphaneden kaldır</string>
+    <string name="remove_book_confirm">Bu kitabı kütüphaneden kaldırmak istiyor musunuz?</string>
+    <string name="collections_empty">Henüz koleksiyon yok.\nYeni koleksiyon oluşturarak kitapları gruplayın.</string>
+    <string name="no_collections">Önce bir koleksiyon oluşturun</string>
+    <string name="book_actions">Kitap işlemleri</string>
     <string name="error_open">Dosya açılamadı</string>
     <string name="error_generic">Bir hata oluştu: %1$s</string>
     <string name="battery_hint">Arka planda okumanın kesilmemesi için pil optimizasyonunu kapatın.</string>

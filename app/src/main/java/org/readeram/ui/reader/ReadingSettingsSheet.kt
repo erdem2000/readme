@@ -4,7 +4,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +16,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -46,27 +50,30 @@ fun ReadingSettingsSheet(
     onVoice: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    val palette = settings.palette
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 stringResource(R.string.reading_settings),
-                color = palette.onChrome,
+                color = onSurface,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = onClose) {
-                Text(stringResource(R.string.close), color = palette.onChrome)
+                Text(stringResource(R.string.close), color = onSurface)
             }
         }
 
-        Label(stringResource(R.string.color_mode), palette)
+        Label(stringResource(R.string.color_mode))
         ChipRow {
             ColorMode.entries.forEach { mode ->
                 FilterChip(
@@ -77,9 +84,9 @@ fun ReadingSettingsSheet(
             }
         }
 
-        Label(stringResource(R.string.brightness), palette)
+        Label(stringResource(R.string.brightness))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.use_system_brightness), color = palette.onChrome, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.use_system_brightness), color = onSurface, modifier = Modifier.weight(1f))
             Switch(
                 checked = settings.useSystemBrightness,
                 onCheckedChange = { checked -> onChange { it.copy(useSystemBrightness = checked) } },
@@ -93,9 +100,9 @@ fun ReadingSettingsSheet(
         )
 
         if (isPdf) {
-            Text(stringResource(R.string.pdf_font_hint), color = palette.muted)
+            Text(stringResource(R.string.pdf_font_hint), color = muted)
         } else {
-            Label(stringResource(R.string.font), palette)
+            Label(stringResource(R.string.font))
             ChipRow {
                 ReaderFont.entries.forEach { font ->
                     FilterChip(
@@ -105,13 +112,13 @@ fun ReadingSettingsSheet(
                     )
                 }
             }
-            Label(stringResource(R.string.font_size), palette)
+            Label(stringResource(R.string.font_size))
             Slider(
                 value = settings.fontSizeSp,
                 onValueChange = { value -> onChange { it.copy(fontSizeSp = value) } },
                 valueRange = 12f..32f,
             )
-            Label(stringResource(R.string.font_weight), palette)
+            Label(stringResource(R.string.font_weight))
             ChipRow {
                 WeightMode.entries.forEach { weight ->
                     FilterChip(
@@ -121,19 +128,19 @@ fun ReadingSettingsSheet(
                     )
                 }
             }
-            Label(stringResource(R.string.line_spacing), palette)
+            Label(stringResource(R.string.line_spacing))
             Slider(
                 value = settings.lineHeight,
                 onValueChange = { value -> onChange { it.copy(lineHeight = value) } },
                 valueRange = 1.1f..2.0f,
             )
-            Label(stringResource(R.string.paragraph_spacing), palette)
+            Label(stringResource(R.string.paragraph_spacing))
             Slider(
                 value = settings.paragraphSpacingSp,
                 onValueChange = { value -> onChange { it.copy(paragraphSpacingSp = value) } },
                 valueRange = 0f..24f,
             )
-            Label(stringResource(R.string.text_align), palette)
+            Label(stringResource(R.string.text_align))
             ChipRow {
                 TextAlignMode.entries.forEach { align ->
                     FilterChip(
@@ -148,7 +155,7 @@ fun ReadingSettingsSheet(
                     )
                 }
             }
-            Label(stringResource(R.string.page_margins), palette)
+            Label(stringResource(R.string.page_margins))
             Slider(
                 value = settings.marginDp.toFloat(),
                 onValueChange = { value -> onChange { it.copy(marginDp = value.toInt()) } },
@@ -156,9 +163,9 @@ fun ReadingSettingsSheet(
             )
         }
 
-        Label(stringResource(R.string.tts_engine), palette)
+        Label(stringResource(R.string.tts_engine))
         if (engines.isEmpty()) {
-            Text(stringResource(R.string.tts_no_engines), color = palette.muted)
+            Text(stringResource(R.string.tts_no_engines), color = muted)
         } else {
             ChipRow {
                 engines.forEach { engine ->
@@ -171,33 +178,37 @@ fun ReadingSettingsSheet(
             }
         }
         if (voices.isNotEmpty()) {
-            Label(stringResource(R.string.tts_voice), palette)
+            Label(stringResource(R.string.tts_voice))
             VoicePicker(
                 voices = voices,
                 selectedName = settings.ttsVoice,
-                palette = palette,
                 onVoice = onVoice,
             )
         }
-        Label(stringResource(R.string.tts_speed), palette)
+        Label(stringResource(R.string.tts_speed))
         Slider(
             value = settings.ttsSpeed,
             onValueChange = { value -> onChange { it.copy(ttsSpeed = value) } },
             valueRange = 0.6f..2.0f,
         )
-        Label(stringResource(R.string.tts_pitch), palette)
+        Label(stringResource(R.string.tts_pitch))
         Slider(
             value = settings.ttsPitch,
             onValueChange = { value -> onChange { it.copy(ttsPitch = value) } },
             valueRange = 0.7f..1.4f,
         )
-        Text(stringResource(R.string.battery_hint), color = palette.muted, modifier = Modifier.padding(bottom = 24.dp))
+        Text(
+            stringResource(R.string.battery_hint),
+            color = muted,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Spacer(Modifier.height(32.dp))
     }
 }
 
 @Composable
-private fun Label(text: String, palette: ReadingPalette) {
-    Text(text, color = palette.onChrome, fontWeight = FontWeight.Medium)
+private fun Label(text: String) {
+    Text(text, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -205,11 +216,12 @@ private fun Label(text: String, palette: ReadingPalette) {
 private fun VoicePicker(
     voices: List<TtsVoiceOption>,
     selectedName: String,
-    palette: ReadingPalette,
     onVoice: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selected = voices.firstOrNull { it.name == selectedName } ?: voices.firstOrNull()
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
             value = selected?.label.orEmpty(),
@@ -222,13 +234,13 @@ private fun VoicePicker(
                 .fillMaxWidth(),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = palette.onChrome,
-                unfocusedTextColor = palette.onChrome,
-                focusedBorderColor = palette.onChrome,
-                unfocusedBorderColor = palette.muted,
-                focusedTrailingIconColor = palette.onChrome,
-                unfocusedTrailingIconColor = palette.onChrome,
-                cursorColor = palette.onChrome,
+                focusedTextColor = onSurface,
+                unfocusedTextColor = onSurface,
+                focusedBorderColor = onSurface,
+                unfocusedBorderColor = muted,
+                focusedTrailingIconColor = onSurface,
+                unfocusedTrailingIconColor = onSurface,
+                cursorColor = onSurface,
             ),
         )
         ExposedDropdownMenu(
